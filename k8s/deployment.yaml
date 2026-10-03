@@ -1,0 +1,56 @@
+# Login token: Secret `jupyter-token`, key `token`. NOT in this file - it is
+# created once by hand, see README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # RWO volume: never run two pods at once
+  selector:
+    matchLabels: {app: jupyter}
+  template:
+    metadata:
+      labels: {app: jupyter}
+    spec:
+      # Notebook code can run anything; it must not get a token for the
+      # Kubernetes API as a side effect.
+      automountServiceAccountToken: false
+      # The Service is named `jupyter`, so Kubernetes would inject
+      # JUPYTER_PORT=tcp://<ip>:80 - and Jupyter Server reads JUPYTER_PORT as
+      # its own port number and crashes on start. Service links are not needed.
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000     # jovyan
+        runAsGroup: 100
+        fsGroup: 100
+      containers:
+        - name: jupyter
+          image: app-image   # set by kustomization.yaml
+          args: ["start-notebook.py", "--ServerApp.ip=0.0.0.0"]
+          env:
+            - name: JUPYTER_TOKEN
+              valueFrom:
+                secretKeyRef: {name: jupyter-token, key: token}
+            # `pip install` goes to ~/.local, which is on the PVC. Without
+            # this it goes to /opt/conda and is lost on every restart.
+            - name: PIP_USER
+              value: "1"
+          ports:
+            - containerPort: 8888
+              name: http
+          volumeMounts:
+            - {name: home, mountPath: /home/jovyan}
+          readinessProbe:
+            httpGet: {path: /api, port: 8888}   # unauthenticated version info
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests: {cpu: 250m, memory: 1Gi}
+            limits:   {cpu: "4", memory: 8Gi}
+      volumes:
+        - name: home
+          persistentVolumeClaim: {claimName: jupyter-home}

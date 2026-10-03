@@ -1,0 +1,28 @@
+# Argo CD reads k8s/ from this repository and makes the namespace `jupyter`
+# match it. The repository is public, so Argo CD reads it over HTTPS with no
+# credentials.
+#
+# Applied by hand: kubectl apply -f cluster/argocd-application.yaml
+#
+# No finalizer: deleting this Application leaves every object in the cluster
+# where it is. The PVC also carries Prune=false,Delete=false (k8s/pvc.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jupyter
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/muzieh/jupyter-k8.git
+    targetRevision: main
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jupyter
+  # prune removes objects that git no longer names (never the PVC, see
+  # above); selfHeal puts back anything changed in the cluster by hand.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

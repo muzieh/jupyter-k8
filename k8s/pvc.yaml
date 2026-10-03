@@ -1,0 +1,20 @@
+# The whole home directory lives here: notebooks, ~/.local (pip --user
+# packages, see PIP_USER in deployment.yaml), ~/.jupyter settings. Survives
+# pod restarts and new images.
+#
+# Prune=false,Delete=false: Argo CD never deletes this claim, not even when it
+# disappears from git or the Application is deleted. The PV behind it is also
+# set to reclaimPolicy Retain (by hand, `kubectl patch pv`), so the data
+# stays on disk even if the claim is deleted.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-home
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi

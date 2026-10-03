@@ -1,0 +1,23 @@
+# Argo CD (Application `jupyter`, see cluster/argocd-application.yaml) makes
+# the namespace `jupyter` match what this directory renders.
+#
+# The Namespace itself is NOT listed here, on purpose. If Argo CD owned it,
+# removing it from git would delete the namespace, and with it the PVC that
+# holds every notebook.
+#
+# The Secret `jupyter-token` is not here either: it is created by hand, see
+# README.md, and Argo CD never touches objects it did not create.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: jupyter
+resources:
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+# The CI job rewrites this block on every build with
+# `kustomize edit set image app-image=localhost:30500/jupyter:<sha>`.
+images:
+  - name: app-image
+    newName: quay.io/jupyter/scipy-notebook
+    newTag: 2026-09-29

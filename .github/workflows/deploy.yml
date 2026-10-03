@@ -1,0 +1,99 @@
+# A push to main builds the JupyterLab image, pushes it to the cluster
+# registry, and points k8s/kustomization.yaml at it. Argo CD then deploys it.
+# Same flow as muzieh/splitek, without the dev/prod split.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    # The job's own commit touches only k8s/. Manifest-only changes are
+    # deployed by Argo CD directly and need no new image.
+    paths-ignore:
+      - 'k8s/**'
+      - 'cluster/**'
+      - 'docs/**'
+      - '**.md'
+  workflow_dispatch: {}
+
+# This is a PUBLIC repository on a SELF-HOSTED runner. There is deliberately
+# no pull_request trigger, and the repository requires approval before a
+# workflow from an outside contributor runs (see README.md, "Security").
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write        # to commit the new image tag
+
+env:
+  BUILDCTL_VERSION: v0.33.0
+  KUSTOMIZE_VERSION: v5.7.1
+  KUBECTL_VERSION: v1.35.7
+  # BuildKit pushes under the in-cluster name; k3s pulls under the node-local
+  # name. Both reach the same registry storage.
+  REGISTRY_PUSH: registry.registry.svc:5000
+  REGISTRY_PULL: localhost:30500
+
+jobs:
+  deploy:
+    # Only the owner's own pushes, never a fork.
+    if: github.repository == 'muzieh/jupyter-k8'
+    runs-on: jupyter
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Name this build after its commit
+        id: vars
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the three tools this job needs
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL "https://github.com/moby/buildkit/releases/download/${BUILDCTL_VERSION}/buildkit-${BUILDCTL_VERSION}.linux-amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" --strip-components=1 bin/buildctl
+          curl -fsSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/bin" kustomize
+          curl -fsSL -o "$RUNNER_TEMP/bin/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x "$RUNNER_TEMP/bin/"*
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Build the image and push it to the registry
+        run: |
+          # The Dockerfile's last step imports every package, so a broken
+          # image fails here and is never pushed.
+          buildctl build \
+            --frontend dockerfile.v0 \
+            --local context=. --local dockerfile=. \
+            --output "type=image,name=${REGISTRY_PUSH}/jupyter:${{ steps.vars.outputs.sha }},push=true,registry.insecure=true"
+
+      - name: Point the deployment at the new image
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          ( cd k8s && kustomize edit set image "app-image=${REGISTRY_PULL}/jupyter:${{ steps.vars.outputs.sha }}" )
+          git add k8s/kustomization.yaml
+          git commit -m "Deploy jupyter ${{ steps.vars.outputs.sha }}"
+          git push origin HEAD:main || { git pull --rebase origin main && git push origin HEAD:main; }
+          echo "DEPLOY_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Wait for Argo CD to run it
+        run: |
+          set -euo pipefail
+          kubectl -n argocd annotate application jupyter \
+            argocd.argoproj.io/refresh=normal --overwrite
+          # The image is ~2 GB on top of the base; the first pull can be slow.
+          for i in $(seq 1 90); do
+            read -r rev sync health <<<"$(kubectl -n argocd get application jupyter \
+              -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}')"
+            echo "[$i] revision=${rev:0:7} sync=${sync:-?} health=${health:-?}"
+            if [ "$rev" = "$DEPLOY_SHA" ] && [ "$sync" = Synced ] && [ "$health" = Healthy ]; then
+              echo "jupyter is running $DEPLOY_SHA"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "jupyter did not become healthy within 15 minutes"
+          exit 1

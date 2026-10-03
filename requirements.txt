@@ -1,0 +1,4 @@
+# Extra Python packages baked into the image. Add a line, push to main, and
+# the new image is deployed a few minutes later.
+openai>=1.40
+python-dotenv

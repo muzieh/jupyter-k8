@@ -1,0 +1,21 @@
+# Reachable from the tailnet only, as https://jupyter.angora-wahoo.ts.net
+# tls.hosts takes a BARE label - the operator appends the tailnet domain.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jupyter
+spec:
+  ingressClassName: tailscale
+  tls:
+    - hosts:
+        - jupyter
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jupyter
+                port:
+                  number: 80

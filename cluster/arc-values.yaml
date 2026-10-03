@@ -1,0 +1,97 @@
+# The runner scale set for muzieh/jupyter-k8 (copied from the splitek scale set). Chart
+# oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+# version 0.14.2, release `jupyter`, namespace `arc-runners`.
+#
+# A scale set is one pool of GitHub Actions runners. Nothing runs while no job
+# is queued; the listener pod creates a runner pod per job and deletes it when
+# the job ends.
+#
+# THE RELEASE NAME IS THE RUNNER LABEL. This chart is installed as `jupyter`,
+# so a workflow selects it with `runs-on: jupyter`. Renaming the release
+# renames the label and breaks every workflow that used it.
+#
+# Installed from the repository root with:
+#
+#   helm install jupyter \
+#     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+#     --version 0.14.2 -n arc-runners \
+#     -f cluster/arc-values.yaml --wait
+#
+# A personal GitHub account registers runners per repository, not per account.
+# This repository therefore gets its own scale set. After the repositories move to the
+# OverSoftLtd organisation, one scale set whose githubConfigUrl points at the
+# organisation replaces every per-repository one.
+githubConfigUrl: https://github.com/muzieh/jupyter-k8
+
+# A STRING here, not a mapping. The chart reads githubConfigSecret two ways.
+# A mapping makes the chart create the Secret, which would put the GitHub App
+# private key into this file and therefore into git. A string names a Secret
+# that already exists in this namespace, and the chart only refers to it.
+# templates/githubsecret.yaml renders nothing when the value is a string, and
+# templates/_helpers.tpl passes the string through as the Secret name.
+#
+# The Secret is a copy of arc-runners/splitek-github-app: the same GitHub App
+# (archi-arc-muzieh) and the same installation, which covers both
+# repositories. README.md shows the copy command. Its three keys must be named
+# exactly github_app_id, github_app_installation_id and github_app_private_key.
+githubConfigSecret: jupyter-github-app
+
+# The controller's own ServiceAccount, which this chart binds to a Role so the
+# controller may manage this scale set.
+#
+# Written down rather than discovered. Left unset, the chart runs a `lookup`
+# over every Deployment in the cluster and picks the one labelled
+# `app.kubernetes.io/part-of: gha-rs-controller`. A `lookup` returns nothing
+# when there is no cluster to read, so `helm template` fails with
+# "No gha-rs-controller deployment found" and the runbook's render check cannot
+# run before the controller is installed. Naming it here skips the lookup.
+#
+# The two values come from the controller release: `arc` in `arc-systems`
+# produces the ServiceAccount `arc-gha-rs-controller`. Renaming that release
+# means changing these two lines.
+controllerServiceAccount:
+  namespace: arc-systems
+  name: arc-gha-rs-controller
+
+# Nothing runs when nothing is queued, so an idle cluster pays nothing.
+#
+# One at a time: the workflow has a concurrency group anyway. Each job loads the single shared BuildKit
+# daemon, and archi is one node that runs Argo CD, the registry, Postgres and
+# every other application at the same time.
+minRunners: 0
+maxRunners: 1
+
+# template is the PodSpec of one runner pod. Keys here that the chart does not
+# handle itself are copied into the pod as written.
+template:
+  spec:
+    # The Kubernetes identity the job runs as. Without this key the chart
+    # creates a ServiceAccount called `jupyter-gha-rs-no-permission` and uses
+    # that instead. runner-rbac.yaml defines this one and its single
+    # permission: get and patch the Argo CD Application `jupyter`.
+    serviceAccountName: jupyter-runner
+    containers:
+      - name: runner
+        # Pinned, so raising it is a visible change in git. GitHub stops
+        # sending jobs to a runner more than 30 days behind the latest release,
+        # so this tag needs raising from time to time.
+        image: ghcr.io/actions/actions-runner:2.337.0
+        # The chart's own default command. It has to be repeated, because
+        # naming the container `runner` replaces the chart's default container
+        # rather than merging into it.
+        command: ['/home/runner/run.sh']
+        env:
+          # Where `buildctl` sends every build. The runner pod builds nothing
+          # itself; it asks the long-lived BuildKit daemon in the `buildkit`
+          # namespace, which keeps its layer cache between jobs.
+          - name: BUILDKIT_HOST
+            value: tcp://buildkitd.buildkit.svc.cluster.local:1234
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            # No CPU limit: a build that is throttled just takes longer for
+            # reasons the job log does not explain. Memory is limited, because
+            # a runaway job on a single-node cluster takes the node down.
+            memory: 2Gi
