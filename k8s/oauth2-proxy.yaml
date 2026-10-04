@@ -42,6 +42,17 @@ spec:
             # character for character. It comes from SSO Server -> General
             # Settings -> Server URL.
             - --oidc-issuer-url=https://superbox.angora-wahoo.ts.net/webman/sso
+            # DSM's discovery document lists its endpoints under /webman/sso/,
+            # but on port 443 those .cgi paths return 404: there the DSM login
+            # portal is published under the alias /sso/ (SSO Server ->
+            # General Settings -> Settings -> Alias). So discovery is skipped
+            # and the working URLs are given here. The JWKS file is static and
+            # works at the advertised path.
+            - --skip-oidc-discovery=true
+            - --login-url=https://superbox.angora-wahoo.ts.net/sso/webman/sso/SSOOauth.cgi
+            - --redeem-url=https://superbox.angora-wahoo.ts.net/sso/webman/sso/SSOAccessToken.cgi
+            - --profile-url=https://superbox.angora-wahoo.ts.net/sso/webman/sso/SSOUserInfo.cgi
+            - --oidc-jwks-url=https://superbox.angora-wahoo.ts.net/webman/sso/openid-jwks.json
             - --scope=openid
             - --oidc-email-claim=sub
             - --authenticated-emails-file=/etc/oauth2-proxy/allowed-users
@@ -50,6 +61,8 @@ spec:
             - --upstream=http://jupyter.jupyter.svc.cluster.local:80
             - --http-address=0.0.0.0:4180
             - --reverse-proxy=true
+            # Only pods (the tailnet Ingress proxy) may set X-Forwarded-*.
+            - --trusted-proxy-ip=10.42.0.0/16
             - --cookie-secure=true
             - --cookie-name=_jupyter_oauth2
             - --skip-provider-button=true
