@@ -1,5 +1,6 @@
 # Reachable from the tailnet only, as https://jupyter.angora-wahoo.ts.net
 # tls.hosts takes a BARE label - the operator appends the tailnet domain.
+# Traffic goes to oauth2-proxy (DSM login), never straight to Jupyter.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -16,6 +17,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: jupyter
+                name: oauth2-proxy
                 port:
                   number: 80

@@ -5,7 +5,7 @@
 # removing it from git would delete the namespace, and with it the PVC that
 # holds every notebook.
 #
-# The Secret `jupyter-token` is not here either: it is created by hand, see
+# The Secret `oauth2-proxy` is not here either: it is created by hand, see
 # README.md, and Argo CD never touches objects it did not create.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -15,6 +15,8 @@ resources:
 - deployment.yaml
 - service.yaml
 - ingress.yaml
+- networkpolicy.yaml
+- oauth2-proxy.yaml
 # The CI job rewrites this block on every build with
 # `kustomize edit set image app-image=localhost:30500/jupyter:<sha>`.
 images:

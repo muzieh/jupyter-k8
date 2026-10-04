@@ -1,5 +1,5 @@
-# Login token: Secret `jupyter-token`, key `token`. NOT in this file - it is
-# created once by hand, see README.md.
+# No Jupyter token: the login is the DSM login in oauth2-proxy, and
+# networkpolicy.yaml lets only oauth2-proxy connect to this pod.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,11 +28,8 @@ spec:
       containers:
         - name: jupyter
           image: app-image   # set by kustomization.yaml
-          args: ["start-notebook.py", "--ServerApp.ip=0.0.0.0"]
+          args: ["start-notebook.py", "--ServerApp.ip=0.0.0.0", "--IdentityProvider.token="]
           env:
-            - name: JUPYTER_TOKEN
-              valueFrom:
-                secretKeyRef: {name: jupyter-token, key: token}
             # `pip install` goes to ~/.local, which is on the PVC. Without
             # this it goes to /opt/conda and is lost on every restart.
             - name: PIP_USER
